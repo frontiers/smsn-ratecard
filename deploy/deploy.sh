@@ -100,7 +100,8 @@ REMOTE
 fi
 
 echo "==> Health check"
-$SSH "curl -fsS http://127.0.0.1:$PORT/healthz" && echo
+# Read PORT/BASE_PATH from the server's .env: they may differ from this run's defaults after the first deploy.
+$SSH "cd '$APP_DIR' && P=\$(grep -E '^PORT=' .env | cut -d= -f2) && B=\$(grep -E '^BASE_PATH=' .env | cut -d= -f2) && curl -fsS http://127.0.0.1:\${P:-3000}\${B%/}/healthz" && echo
 echo
 echo "Done."
 if [[ -n "$DOMAIN" ]]; then echo "Backend: https://$DOMAIN/admin"

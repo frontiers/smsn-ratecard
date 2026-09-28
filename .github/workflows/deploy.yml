@@ -41,4 +41,4 @@ jobs:
           rsync -az --delete -e "$SSH" \
             --exclude node_modules --exclude data --exclude .env --exclude .git \
             ./ "$TARGET:$APP_DIR/"
-          $SSH "$TARGET" "cd '$APP_DIR' && npm ci --omit=dev --no-audit --no-fund && pm2 startOrReload deploy/ecosystem.config.cjs --update-env && pm2 save >/dev/null && sleep 2 && curl -fsS http://127.0.0.1:\$(grep -E '^PORT=' .env | cut -d= -f2 || echo 3000)/healthz"
+          $SSH "$TARGET" "cd '$APP_DIR' && npm ci --omit=dev --no-audit --no-fund && pm2 startOrReload deploy/ecosystem.config.cjs --update-env && pm2 save >/dev/null && sleep 2 && P=\$(grep -E '^PORT=' .env | cut -d= -f2) && B=\$(grep -E '^BASE_PATH=' .env | cut -d= -f2) && curl -fsS http://127.0.0.1:\${P:-3000}\${B%/}/healthz"
