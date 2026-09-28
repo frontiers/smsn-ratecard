@@ -1,0 +1,23 @@
+# Option A — subdomain, e.g. https://proposals.samansamnuek.com  (leave BASE_PATH empty)
+server {
+    server_name proposals.samansamnuek.com;
+    # ... your existing ssl_certificate lines ...
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        client_max_body_size 15m;   # logos/avatars are stored inside each proposal
+    }
+}
+
+# Option B — sub-path on the main site, e.g. https://samansamnuek.com/proposals
+# Set BASE_PATH=/proposals in .env, then inside the existing server { } block:
+#
+# location /proposals/ {
+#     proxy_pass http://127.0.0.1:3000;
+#     proxy_set_header Host $host;
+#     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+#     proxy_set_header X-Forwarded-Proto $scheme;
+#     client_max_body_size 15m;
+# }

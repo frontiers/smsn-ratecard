@@ -1,0 +1,44 @@
+# Auto-deploy on every push to main.
+# One-time setup (GitHub repo → Settings → Secrets and variables → Actions):
+#   DEPLOY_HOST     103.234.238.50
+#   DEPLOY_USER     ubuntu
+#   DEPLOY_SSH_KEY  private key whose public key is in ~/.ssh/authorized_keys on the server
+# The first deploy (creating .env and the admin password) must be done once with ./deploy/deploy.sh.
+name: Deploy
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency: deploy
+
+jobs:
+  test-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm test
+
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          ssh-keyscan -H "${{ secrets.DEPLOY_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Upload and restart
+        env:
+          TARGET: ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}
+          APP_DIR: /home/${{ secrets.DEPLOY_USER }}/samansamnuek-proposals
+        run: |
+          SSH="ssh -i ~/.ssh/id_deploy"
+          $SSH "$TARGET" "test -f '$APP_DIR/.env'" || { echo "Run ./deploy/deploy.sh once first to create .env on the server"; exit 1; }
+          rsync -az --delete -e "$SSH" \
+            --exclude node_modules --exclude data --exclude .env --exclude .git \
+            ./ "$TARGET:$APP_DIR/"
+          $SSH "$TARGET" "cd '$APP_DIR' && npm ci --omit=dev --no-audit --no-fund && pm2 startOrReload deploy/ecosystem.config.cjs --update-env && pm2 save >/dev/null && sleep 2 && curl -fsS http://127.0.0.1:\$(grep -E '^PORT=' .env | cut -d= -f2 || echo 3000)/healthz"
