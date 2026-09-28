@@ -28,3 +28,28 @@ for (const c of s.channels || []) {
 console.log("--- client receives ---");
 console.log("channels:", pub.channels.length, "| phases:", short(pub.phases.map((p) => [p.id, p.items.length])));
 for (const c of pub.channels) console.log("client channel:", short({ name: c.name, price: c.price, itemRate: c.itemRate, phaseTotal: c.phaseTotal, ph: c.ph }));
+
+// Run the client page's own pricing code (public/assets/app.js) on the client payload.
+const vm = require("vm");
+const noop = () => {};
+const el = { dataset: { mode: "none", base: "" }, addEventListener: noop };
+const ctx = vm.createContext({
+  document: { body: el, querySelector: () => null, querySelectorAll: () => [], addEventListener: noop, createElement: () => el },
+  addEventListener: noop, location: { pathname: "/", origin: "" }, localStorage: { getItem: () => null, setItem: noop, removeItem: noop },
+  fetch: () => new Promise(noop), setTimeout, clearTimeout, console,
+});
+vm.runInContext(fs.readFileSync(path.join(__dirname, "..", "public", "assets", "app.js"), "utf8"), ctx);
+ctx.__pub = JSON.parse(JSON.stringify(pub));
+const out = vm.runInContext(`(() => {
+  S = __pub; DEFAULT = clone(S); normalize();
+  const q = quote();
+  return {
+    grand: q.grand, pre: q.pre, net: q.net, selected: q.sel.length,
+    channels: q.list.map(({ c, k }) => ({ name: c.name, total: k.total, phases: k.rows.map(r => [r.ph.id, r.on, r.price, r.lines.map(l => [l.t.id, l.qty, l.unit])]) })),
+    byPhase: S.phases.map(ph => { const s = phaseSummary(ph); return [ph.id, s.rows.length, s.grand]; }),
+  };
+})()`, ctx);
+console.log("--- client page calculation ---");
+console.log("grand total:", out.grand, "| before VAT:", out.pre, "| content:", out.net, "| channels selected:", out.selected);
+console.log("by phase [id, channels, total]:", short(out.byPhase));
+for (const c of out.channels) console.log("calc:", short(c));
