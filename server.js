@@ -8,6 +8,7 @@ const express = require("express");
 const store = require("./src/store");
 const auth = require("./src/auth");
 const { toPublic } = require("./src/publicView");
+const drive = require("./src/drive");
 
 const PORT = +process.env.PORT || 3000;
 const BASE = (process.env.BASE_PATH || "").replace(/\/$/, ""); // e.g. "/proposals" when served under a sub-path
@@ -103,6 +104,17 @@ const wrap = (fn) => (req, res, next) => fn(req, res).catch(next);
 const validState = (s) => s && typeof s === "object" && Array.isArray(s.channels) && Array.isArray(s.phases) && s.settings && s.meta;
 
 admin.get("/seed", wrap(async (req, res) => res.json(await store.readSeed())));
+admin.get("/drive/status", (req, res) => res.json({ configured: drive.configured() }));
+admin.post("/proposals/:id/drive", wrap(async (req, res) => {
+  const rec = await store.get(req.params.id);
+  if (!rec) return res.status(404).json({ error: "not found" });
+  const { filename, mimeType, data, convert } = req.body || {};
+  if (typeof filename !== "string" || typeof data !== "string") return res.status(400).json({ error: "ข้อมูลไม่ครบ" });
+  const buf = Buffer.from(data, "base64");
+  if (!buf.length || buf.length > 15 * 1024 * 1024) return res.status(413).json({ error: "ไฟล์ใหญ่เกินไป" });
+  const f = await drive.upload({ folderName: rec.title, filename, mimeType, data: buf, convert: !!convert });
+  res.json({ id: f.id, name: f.name, webViewLink: f.webViewLink });
+}));
 admin.get("/proposals", wrap(async (req, res) => res.json({ items: await store.list() })));
 admin.post("/proposals", wrap(async (req, res) => {
   const fromId = req.body?.fromId;
@@ -113,8 +125,9 @@ admin.post("/proposals", wrap(async (req, res) => {
     state = src.state;
     title = src.title + " (สำเนา)";
   } else {
-    state = await store.readSeed();
-    title = "ข้อเสนอใหม่";
+    const tpl = req.body?.template === "rov-10th" ? "rov-10th" : "general";
+    state = await store.readSeed(tpl);
+    title = tpl === "general" ? "ข้อเสนอใหม่" : "ข้อเสนอใหม่ (มี Phase)";
   }
   const rec = await store.create({ title, state, published: false });
   res.status(201).json({ meta: store.metaOf(rec) });
@@ -151,6 +164,7 @@ app.use(BASE || "/", router);
 app.use((req, res) => res.status(404).type("text").send("Not found"));
 app.use((err, req, res, next) => {
   if (err.status === 404) return res.status(404).json({ error: "not found" });
+  if (err.expose && err.status) return res.status(err.status).json({ error: err.message });
   if (err.type === "entity.too.large") return res.status(413).json({ error: "ข้อมูลใหญ่เกินไป ลองใช้รูปขนาดเล็กลง" });
   console.error(err);
   res.status(500).json({ error: "server error" });

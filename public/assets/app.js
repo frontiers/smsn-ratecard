@@ -13,9 +13,10 @@ let adminOpen = false, tab = "channels", dirty = false, menuOpen = false, phaseV
 function normalize(){
   if(DEFAULT){
     for(const k of Object.keys(DEFAULT)) if(S[k]===undefined) S[k]=clone(DEFAULT[k]);
-    for(const k of ["brand","company","meta","quote","settings"]) if(DEFAULT[k]&&S[k]) for(const kk of Object.keys(DEFAULT[k])) if(S[k][kk]===undefined) S[k][kk]=clone(DEFAULT[k][kk]);
+    for(const k of ["brand","company","meta","quote","settings","invoice"]) if(DEFAULT[k]&&S[k]) for(const kk of Object.keys(DEFAULT[k])) if(S[k][kk]===undefined) S[k][kk]=clone(DEFAULT[k][kk]);
   }
-  S.extras=S.extras||[]; S.quote.customItems=S.quote.customItems||[];
+  S.extras=S.extras||[]; S.quote.customItems=S.quote.customItems||[]; S.invoice=S.invoice||{};
+  if(!S.phases?.length) S.phases=[{id:"p1",name:"ขอบเขตงาน",dates:"",deliverables:"",items:[]}];
   S.channels.forEach(c=>{ c.ph=c.ph||{}; c.override=c.override||{}; c.rates=c.rates||{}; c.platforms=c.platforms||[]; if(!c.id) c.id=uid(); });
   migrate();
 }
@@ -52,6 +53,10 @@ function setPath(p,v){ const ks=p.split("."); const last=ks.pop(); const o=ks.re
 //             {type:"fixed"|"perPhase"|"opportunity"} charged once per channel
 //   Client pages get c.itemRate / c.phaseTotal / c.extraAmt pre-computed by the server (src/publicView.js).
 let unpick=new Set(), unpickPh=new Set();
+// Phases are optional: with settings.usePhases off the proposal is one flat list of work (the first phase).
+const usePh = () => S.settings.usePhases!==false;
+const PH = () => usePh() ? S.phases : S.phases.slice(0,1);
+const phName = ph => usePh() ? ph.name : "ค่างาน";
 const picked = c => adminOpen || !unpick.has(c.id);
 const phOn = (c,ph) => c.ph?.[ph.id]!==false && (adminOpen || !unpickPh.has(ph.id));
 const DEAL_TYPES=["dealPct","dealFixed"];
@@ -85,10 +90,10 @@ function chExtraAmt(c,x,actCount){
 }
 function calc(c){
   const P=+c.price||0;
-  const rows=S.phases.map(ph=>({...phaseCalc(c,ph),on:phOn(c,ph)}));
+  const rows=PH().map(ph=>({...phaseCalc(c,ph),on:phOn(c,ph)}));
   const act=rows.filter(r=>r.on);
   const content=act.reduce((s,r)=>s+r.price,0);
-  const full=S.settings.bundleOn && act.length===S.phases.length && S.phases.length>1;
+  const full=S.settings.bundleOn && act.length===PH().length && PH().length>1;
   const bundle=full?rnd(content*(+S.settings.bundlePct||0)/100):0;
   const net=content-bundle;
   const rush=act.reduce((s,r)=>s+r.rush,0);
@@ -105,7 +110,7 @@ function vatOf(pre,list){
   return 0;
 }
 function quote(){
-  const sel=S.channels.filter(c=>c.on && picked(c) && S.phases.some(p=>phOn(c,p)));
+  const sel=S.channels.filter(c=>c.on && picked(c) && PH().some(p=>phOn(c,p)));
   const list=sel.map(c=>({c,k:calc(c)}));
   const net=list.reduce((s,x)=>s+x.k.net,0);
   const rush=list.reduce((s,x)=>s+x.k.rush,0);
@@ -142,15 +147,15 @@ function selBar(q){
     <div class="sb-main"><span class="sb-n"><b class="num">${q.sel.length}</b>/${total} ช่อง</span>
       <span class="sb-p">${q.pct?`ลด ${q.pct}%`:"ราคาปกติ"}${nx?`<small> · +${nx.need} ช่อง ลด ${nx.pct}%</small>`:""}</span>
       <span class="sb-t num">฿${fmt(q.pre)}<small> ก่อน VAT</small></span></div>
-    <div class="sb-ph">${S.phases.map(p=>`<button class="small ${unpickPh.has(p.id)?"":"on"}" data-act="pickPh" data-id="${esc(p.id)}" aria-pressed="${!unpickPh.has(p.id)}">${esc(p.name.split(":")[0])}</button>`).join("")}
+    <div class="sb-ph">${(usePh()?PH():[]).map(p=>`<button class="small ${unpickPh.has(p.id)?"":"on"}" data-act="pickPh" data-id="${esc(p.id)}" aria-pressed="${!unpickPh.has(p.id)}">${esc(p.name.split(":")[0])}</button>`).join("")}
       <button class="small ghost" data-act="pickAll">เลือกทั้งหมด</button>${q.sel.length?`<button class="small ghost" data-act="pickNone">ล้าง</button>`:""}</div>
   </div></div>`;
 }
 function focusPh(){ return S.phases.find(p=>p.id===(phaseView||S.settings.focusPhase)) || S.phases[S.phases.length-1]; }
 function dealNote(){ const d=S.extras.filter(x=>x.on&&isDeal(x)); return d.length?`${d.map(x=>x.label+(x.type==="dealPct"?` ${x.value}%`:"")).join(" และ ")} คิดครั้งเดียวต่อดีล จากยอดหลังหักส่วนลด`:""; }
 function byPhaseHTML(){
-  if(!S.phases.length) return "";
-  const q=quote(), fp=focusPh(), sums=S.phases.map(phaseSummary), cur=sums.find(x=>x.ph.id===fp.id);
+  if(!usePh() || !PH().length) return "";
+  const q=quote(), fp=focusPh(), sums=PH().map(phaseSummary), cur=sums.find(x=>x.ph.id===fp.id);
   const vatOn=S.settings.vatMode!=="none";
   const hasRush=cur.rush>0, hasEx=cur.extra>0;
   const detailRows=cur.rows.map(r=>`<tr><td><b>${esc(r.c.name)}</b><div class="likes">${esc(linesText(r.r))}</div></td><td class="r num">${fmt(r.price)}</td>${hasRush?`<td class="r num">${r.rush?fmt(r.rush):"–"}</td>`:""}${hasEx?`<td class="r num">${r.extra?fmt(r.extra):"–"}</td>`:""}<td class="r num"><b>${fmt(r.total)}</b></td></tr>`).join("");
@@ -159,7 +164,7 @@ function byPhaseHTML(){
   const fc=x=>x.ph.id===fp.id?"focus":"";
   return `<section class="block gutter" id="by-phase"><div class="max">
     <div class="block-head"><h2>Price by Phase</h2><p>เลือกดูราคารวมทุกช่องทีละ Phase พร้อมรายการงานของแต่ละช่อง${dealNote()?` · ${esc(dealNote())}`:""}</p></div>
-    <div class="phase-tabs" role="tablist" aria-label="เลือก Phase">${S.phases.map(p=>`<button role="tab" aria-selected="${p.id===fp.id}" data-act="phaseView" data-ph="${esc(p.id)}">${esc(p.name)}</button>`).join("")}</div>
+    <div class="phase-tabs" role="tablist" aria-label="เลือก Phase">${PH().map(p=>`<button role="tab" aria-selected="${p.id===fp.id}" data-act="phaseView" data-ph="${esc(p.id)}">${esc(p.name)}</button>`).join("")}</div>
     <div class="pv">
       <div class="pv-total">
         <span class="eyebrow" style="color:inherit;opacity:.7">${esc(fp.dates)} · ${cur.rows.length} ช่อง</span>
@@ -184,7 +189,7 @@ function byPhaseHTML(){
     </div>
     <h3 class="sub">เทียบทุก Phase</h3>
     <div class="scroll"><table class="matrix">
-      <thead><tr><th>ช่อง</th>${S.phases.map(p=>`<th class="r ${p.id===fp.id?"focus":""}">${esc(p.name)}</th>`).join("")}<th class="r">${unpickPh.size?"รวม Phase ที่เลือก":"ครบทุก Phase"}</th></tr></thead>
+      <thead><tr><th>ช่อง</th>${PH().map(p=>`<th class="r ${p.id===fp.id?"focus":""}">${esc(p.name)}</th>`).join("")}<th class="r">${unpickPh.size?"รวม Phase ที่เลือก":"ครบทุก Phase"}</th></tr></thead>
       <tbody>${q.list.map(({c,k})=>`<tr><td><b>${esc(c.name)}</b></td>${sums.map(x=>{const r=x.rows.find(r=>r.c===c);return `<td class="r num ${fc(x)}">${r?fmt(r.total):"–"}</td>`;}).join("")}<td class="r num"><b>${fmt(k.total)}</b></td></tr>`).join("")}</tbody>
       <tfoot>
         <tr><td>รวม</td>${sums.map(x=>`<td class="r num ${fc(x)}">${fmt(x.content+x.rush+x.extra)}</td>`).join("")}<td class="r num">${fmt(q.sub)}</td></tr>
@@ -221,7 +226,9 @@ function renderSite(){
   const cards=(adminOpen?S.channels:S.channels.filter(c=>c.on)).map(c=>{
     const k=calc(c);
     const pf=c.platforms.map(p=>`<div class="pf-row"><span class="pf-tag ${esc(p.p)}">${esc(p.p)}</span>${p.url?`<a href="${esc(p.url)}" target="_blank" rel="noopener">${esc(p.handle||p.url)}</a>`:`<span>${esc(p.handle)}</span>`}<span class="num">${p.followers?compact(p.followers):"–"}${p.likes?` <span class="likes">· ${compact(p.likes)} likes</span>`:""}</span></div>`).join("");
-    const fpid=focusPh()?.id; const rows=k.act.map(r=>`<div class="row ${r.ph.id===fpid?"fp":""}"><span>${esc(r.ph.name)}</span><span class="num">${fmt(r.price)}</span></div><div class="items-line">${esc(linesText(r))}${r.overridden?" · ราคาพิเศษ":""}</div>`).join("");
+    const fpid=focusPh()?.id; const rows=usePh()
+      ? k.act.map(r=>`<div class="row ${r.ph.id===fpid?"fp":""}"><span>${esc(r.ph.name)}</span><span class="num">${fmt(r.price)}</span></div><div class="items-line">${esc(linesText(r))}${r.overridden?" · ราคาพิเศษ":""}</div>`).join("")
+      : k.act.map(r=>r.overridden?`<div class="row"><span>${esc(linesText(r))}</span><span class="num">${fmt(r.price)}</span></div>`:r.lines.map(l=>`<div class="row"><span>${esc(l.label)}${l.qty>1?` ×${l.qty}`:""}</span><span class="num">${l.included?"รวมแล้ว":fmt(l.amt)}</span></div>`).join("")).join("");
     const on=picked(c);
     return `<article class="card ${c.on?"":"off"} ${on?"":"unpicked"}" id="ch-${esc(c.id)}">
       <div class="card-top">${avatarHTML(c)}<div style="min-width:0;flex:1"><h3>${esc(c.name)}</h3>${c.niche?`<div class="niche">${esc(c.niche)}</div>`:""}${c.note?`<div class="note">${esc(c.note)}</div>`:""}</div>${!adminOpen?`<button class="pick ${on?"on":""}" data-act="pickCh" data-id="${esc(c.id)}" aria-pressed="${on}">${on?"✓ เลือกแล้ว":"+ เลือก"}</button>`:""}</div>
@@ -239,18 +246,18 @@ function renderSite(){
     const sh=tiers.length>1?Math.round(i/(tiers.length-1)*100):0; const dark=sh>=55;
     return `<div class="tier ${act?"active":""} ${dark?"dark":""}" style="background:color-mix(in srgb,var(--ink) ${sh}%,var(--paper))"><span class="eyebrow">${range}</span><span class="pct">${t.pct?`−${t.pct}%`:"ราคาปกติ"}</span>${act?`<span class="you">แพ็กที่เสนอ (${q.sel.length} ช่อง)</span>`:""}</div>`; }).join(""):"";
   const extraCols=S.extras.filter(x=>x.on&&!isDeal(x));
-  const sumRows=q.list.map(({c,k})=>`<tr><td><b>${esc(c.name)}</b><div class="likes">${esc(mainHandle(c))}</div></td><td class="r num">${compact(reach(c))}</td>${S.phases.map(ph=>{const r=k.rows.find(r=>r.ph.id===ph.id);return `<td class="r num">${r.on?fmt(r.price):"–"}</td>`;}).join("")}<td class="r num">${k.bundle?"−"+fmt(k.bundle):"–"}</td><td class="r num">${k.rush?fmt(k.rush):"–"}</td>${extraCols.map(x=>{const e=k.extras.find(e=>e.x.id===x.id);return `<td class="r num">${e?fmt(e.amt):"–"}</td>`;}).join("")}<td class="r num"><b>${fmt(k.total)}</b></td></tr>`).join("");
-  const cols=5+S.phases.length+extraCols.length;
+  const sumRows=q.list.map(({c,k})=>`<tr><td><b>${esc(c.name)}</b><div class="likes">${esc(mainHandle(c))}</div></td><td class="r num">${compact(reach(c))}</td>${PH().map(ph=>{const r=k.rows.find(r=>r.ph.id===ph.id);return `<td class="r num">${r.on?fmt(r.price):"–"}</td>`;}).join("")}${usePh()?`<td class="r num">${k.bundle?"−"+fmt(k.bundle):"–"}</td>`:""}<td class="r num">${k.rush?fmt(k.rush):"–"}</td>${extraCols.map(x=>{const e=k.extras.find(e=>e.x.id===x.id);return `<td class="r num">${e?fmt(e.amt):"–"}</td>`;}).join("")}<td class="r num"><b>${fmt(k.total)}</b></td></tr>`).join("");
+  const cols=(usePh()?5:4)+PH().length+extraCols.length;
   const vatLabel=S.settings.vatMode==="none"?"":S.settings.vatMode==="all"?`VAT ${S.settings.vatPct}%`:`VAT ${S.settings.vatPct}% (เฉพาะช่องที่ออกใบกำกับ)`;
   $("#app").innerHTML=`
   <header class="topbar gutter" id="top"><div class="max">
     ${wordmark()}
-    <nav class="nav" aria-label="เมนู"><a href="#by-phase">By Phase</a><a href="#channels">Channels</a><a href="#packages">Packages</a><a href="#phases">Deliverables</a><a href="#summary">Summary</a></nav>
+    <nav class="nav" aria-label="เมนู">${usePh()?`<a href="#by-phase">By Phase</a>`:""}<a href="#channels">Channels</a><a href="#packages">Packages</a><a href="#phases">Deliverables</a><a href="#summary">Summary</a></nav>
     <div class="actions">
       <button class="small" data-act="copyText">คัดลอกข้อความ</button>
       <button class="small" data-act="toggleMenu" aria-expanded="${menuOpen}">Google Sheets ▾</button>
       <button class="small solid" data-act="openQuote">ใบเสนอราคา</button>
-      ${menuOpen?`<div class="menu" role="menu"><button data-act="copyTSV" role="menuitem">คัดลอกตาราง → วางใน Google Sheets</button><button data-act="xlsx" role="menuitem">ดาวน์โหลดไฟล์ .xlsx (เปิดใน Sheets ได้)</button><button data-act="csv" role="menuitem">ดาวน์โหลด .csv</button></div>`:""}
+      ${menuOpen?`<div class="menu" role="menu"><button data-act="copyTSV" role="menuitem">คัดลอกตาราง → วางใน Google Sheets</button><button data-act="xlsx" role="menuitem">ดาวน์โหลดไฟล์ .xlsx (เปิดใน Sheets ได้)</button><button data-act="csv" role="menuitem">ดาวน์โหลด .csv</button>${caps.canEdit&&driveOK?`<button data-act="sheetDrive" role="menuitem">บันทึกเป็น Google Sheet ลง Drive</button>`:""}</div>`:""}
     </div></div></header>
   <section class="hero gutter"><div class="max">
     <div class="hero-grid"><div>
@@ -274,13 +281,13 @@ function renderSite(){
     <div class="block-head"><h2>ยิ่งเลือกหลายช่อง ยิ่งคุ้ม</h2><p>ส่วนลดขั้นบันไดคิดจากค่าคอนเทนต์รวม ไม่รวมค่าเร่งงาน${dealNote()?` · ${esc(dealNote())}`:""}</p></div>
     <div class="tiers">${tierHTML}</div>${(()=>{ const n=q.sel.length, nx=nextTier(n); return `<p class="tier-hint">ตอนนี้เลือก <b>${n} ช่อง</b> ${q.pct?`ได้ส่วนลด <b>${q.pct}%</b> (−฿${fmt(q.disc)})`:"ยังไม่มีส่วนลดแพ็ก"}${nx?` · เลือกเพิ่มอีก <b>${nx.need} ช่อง</b> ลดเป็น <b>${nx.pct}%</b>`:""}</p>`; })()}</div></section>`:""}
   <section class="block gutter alt" id="phases"><div class="max">
-    <div class="block-head"><h2>Deliverables</h2><p>งานที่ครีเอเตอร์แต่ละช่องทำในแต่ละ Phase</p></div>
-    <div class="phases">${S.phases.map(p=>`<article class="phase"><span class="dates">${esc(p.dates)}</span><h3>${esc(p.name)}</h3><ul>${p.deliverables.split("\n").filter(Boolean).map(l=>`<li>${esc(l)}</li>`).join("")}</ul>${(p.items||[]).some(it=>typeOf(it.type).included)?`<p class="incl">รวมในราคาแล้ว: ${esc(p.items.filter(it=>typeOf(it.type).included).map(it=>it.label||typeOf(it.type).label).join(" · "))}</p>`:""}</article>`).join("")}</div>
+    <div class="block-head"><h2>Deliverables</h2><p>${usePh()?"งานที่ครีเอเตอร์แต่ละช่องทำในแต่ละ Phase":"งานที่ครีเอเตอร์แต่ละช่องทำ"}</p></div>
+    <div class="phases">${PH().map(p=>`<article class="phase">${usePh()?`<span class="dates">${esc(p.dates)}</span><h3>${esc(p.name)}</h3>`:""}${!usePh()&&!p.deliverables.trim()?`<ul>${(p.items||[]).map(it=>`<li>${esc(it.label||typeOf(it.type).label)}${+it.qty>1?` ×${it.qty}`:""}</li>`).join("")}</ul>`:""}<ul>${p.deliverables.split("\n").filter(Boolean).map(l=>`<li>${esc(l)}</li>`).join("")}</ul>${(p.items||[]).some(it=>typeOf(it.type).included)?`<p class="incl">รวมในราคาแล้ว: ${esc(p.items.filter(it=>typeOf(it.type).included).map(it=>it.label||typeOf(it.type).label).join(" · "))}</p>`:""}</article>`).join("")}</div>
   </div></section>
   <section class="block gutter" id="summary"><div class="max">
     <div class="block-head"><h2>Summary</h2><p>ราคาเป็นบาท · เสนอวันที่ ${esc(m.date)} · ราคายืนถึง ${esc(m.valid)}</p></div>
     <div class="scroll"><table>
-      <thead><tr><th>ช่อง</th><th class="r">ผู้ติดตาม</th>${S.phases.map(p=>`<th class="r">${esc(p.name.split(":")[0])}</th>`).join("")}<th class="r">ลดครบ Phase</th><th class="r">ค่าเร่งงาน</th>${extraCols.map(x=>`<th class="r">${esc(x.label)}</th>`).join("")}<th class="r">รวม</th></tr></thead>
+      <thead><tr><th>ช่อง</th><th class="r">ผู้ติดตาม</th>${PH().map(p=>`<th class="r">${esc(phName(p).split(":")[0])}</th>`).join("")}${usePh()?`<th class="r">ลดครบ Phase</th>`:""}<th class="r">ค่าเร่งงาน</th>${extraCols.map(x=>`<th class="r">${esc(x.label)}</th>`).join("")}<th class="r">รวม</th></tr></thead>
       <tbody>${sumRows||`<tr><td colspan="${cols}">ยังไม่ได้เลือกช่อง</td></tr>`}</tbody>
       <tfoot>
         <tr><td colspan="${cols-1}">รวม ${q.sel.length} ช่อง</td><td class="r num">${fmt(q.sub)}</td></tr>
@@ -301,7 +308,7 @@ function renderSite(){
 }
 
 /* =================== admin =================== */
-const TABS=[["channels","ช่อง"],["rates","รายการ & เรท"],["phases","Phase & รายการงาน"],["pricing","ส่วนลด & ค่าเพิ่ม"],["quote","ใบเสนอราคา"],["content","หัวเรื่อง & เงื่อนไข"],["brand","แบรนด์ & บริษัท"],["data","ข้อมูล"]];
+const TABS=[["channels","ช่อง"],["rates","รายการ & เรท"],["phases","งาน / Phase"],["pricing","ส่วนลด & ค่าเพิ่ม"],["quote","ใบเสนอราคา / ใบแจ้งหนี้"],["content","หัวเรื่อง & เงื่อนไข"],["brand","แบรนด์ & บริษัท"],["data","ข้อมูล"]];
 function fIn(path,label,opts={}){
   const v=getPath(path); const id="f_"+path.replace(/\./g,"_");
   const attrs=`id="${id}" data-bind="${path}" ${opts.num?"data-num":""} ${opts.pct?"data-pct":""}`;
@@ -333,10 +340,10 @@ function tabChannels(){
     <div><button class="small" data-act="addPf" data-i="${i}">+ แพลตฟอร์ม</button></div>
     <span class="lab">เรทรายการของช่องนี้ (เว้นว่าง = ใช้สูตรในแท็บ “รายการ & เรท”)</span>
     <div class="grid3">${(S.itemTypes||[]).map(ty=>`<div class="f"><label>${esc(ty.label)}${ty.unit?` /${esc(ty.unit)}`:""}</label><input data-bind="channels.${i}.rates.${ty.id}" data-rate value="${c.rates?.[ty.id]??""}" placeholder="${ty.included?"รวมแล้ว (0)":fmt(autoRate(c,ty))}"></div>`).join("")}</div>
-    <span class="lab">Phase ที่เสนอ & ราคารวม Phase (เว้นว่าง = รวมจากรายการ)</span>
+    <span class="lab">${usePh()?"Phase ที่เสนอ & ราคารวม Phase (เว้นว่าง = รวมจากรายการ)":"ราคารวมของช่องนี้ (เว้นว่าง = รวมจากรายการ)"}</span>
     ${k.rows.map(r=>`<div class="rowline" style="grid-template-columns:auto 1fr 130px">
-      <input type="checkbox" data-bind="channels.${i}.ph.${r.ph.id}" data-bool ${r.on?"checked":""} aria-label="${esc(r.ph.name)}">
-      <span style="font-size:14px">${esc(r.ph.name)} <span class="help" style="display:inline">${esc(linesText({...r,lines:r.lines}))}${r.rush?` · เร่ง ${fmt(r.rush)}`:""}</span></span>
+      ${usePh()?`<input type="checkbox" data-bind="channels.${i}.ph.${r.ph.id}" data-bool ${r.on?"checked":""} aria-label="${esc(r.ph.name)}">`:"<span></span>"}
+      <span style="font-size:14px">${esc(phName(r.ph))} <span class="help" style="display:inline">${esc(linesText({...r,lines:r.lines}))}${r.rush?` · เร่ง ${fmt(r.rush)}`:""}</span></span>
       <input data-bind="channels.${i}.override.${r.ph.id}" data-override value="${c.override?.[r.ph.id]??""}" placeholder="${fmt(r.items)}" aria-label="ราคารวม Phase กำหนดเอง"></div>`).join("")}
     <div class="panel-head"><button class="small" data-act="moveCh" data-i="${i}" data-d="-1">↑ ขึ้น</button><button class="small" data-act="moveCh" data-i="${i}" data-d="1">↓ ลง</button><button class="small" data-act="dupCh" data-i="${i}">ทำสำเนา</button><span class="grow"></span><button class="small danger" data-act="delCh" data-i="${i}">ลบช่องนี้</button></div>
   </details>`;}).join("")}
@@ -358,18 +365,28 @@ function tabRates(){
 }
 function tabPhases(){
   const opts=(S.itemTypes||[]).map(ty=>[ty.id,ty.label]);
-  return `<p class="help">แต่ละ Phase ใส่รายการงานได้ไม่จำกัด ราคา Phase ของแต่ละช่อง = ผลรวม (เรทรายการของช่อง × จำนวน) · ติ๊ก “เร่ง” เพื่อบวกค่าเร่งงานของช่องต่อชิ้น</p>
-  ${S.phases.map((p,pi)=>`<div class="panel">
-    <div class="grid2">${fIn(`phases.${pi}.name`,"ชื่อ Phase")}${fIn(`phases.${pi}.dates`,"ช่วงวันที่")}</div>
-    ${fIn(`phases.${pi}.deliverables`,"Deliverables ที่แสดงให้ลูกค้า (บรรทัดละ 1 ข้อ)",{area:1,rows:3})}
-    <span class="lab">รายการงาน: ประเภท · ข้อความที่แสดง · จำนวน · เร่ง</span>
-    ${(p.items||[]).map((it,ii)=>`<div class="rowline item-row">
+  const itemRows=(p,pi)=>`${(p.items||[]).map((it,ii)=>`<div class="rowline item-row">
       <select data-bind="phases.${pi}.items.${ii}.type" aria-label="ประเภท">${opts.map(([v,l])=>`<option value="${esc(v)}" ${it.type===v?"selected":""}>${esc(l)}</option>`).join("")}</select>
       <input data-bind="phases.${pi}.items.${ii}.label" value="${esc(it.label||"")}" placeholder="${esc(typeOf(it.type).label)}" aria-label="ข้อความ">
       <input data-bind="phases.${pi}.items.${ii}.qty" data-num value="${it.qty}" aria-label="จำนวน">
       <label class="chk"><input type="checkbox" data-bind="phases.${pi}.items.${ii}.rush" data-bool ${it.rush?"checked":""}> เร่ง</label>
       <button class="x" data-act="delPhItem" data-p="${pi}" data-c="${ii}" aria-label="ลบรายการ">×</button></div>`).join("")}
-    <div class="panel-head"><button class="small" data-act="addPhItem" data-p="${pi}">+ รายการงาน</button><button class="small" data-act="movePhase" data-p="${pi}" data-d="-1">↑</button><button class="small" data-act="movePhase" data-p="${pi}" data-d="1">↓</button><span class="grow"></span><button class="small danger" data-act="delPhase" data-p="${pi}">ลบ Phase</button></div>
+    <div class="panel-head"><button class="small" data-act="addPhItem" data-p="${pi}">+ รายการงาน</button>`;
+  const toggle=`<div class="panel soft">${fChk("settings.usePhases","แบ่งงานเป็น Phase")}<p class="help">ปิดไว้สำหรับงานทั่วไปที่ไม่มี Phase: ลูกค้าจะเห็นรายการงานต่อช่องตรง ๆ ไม่มีส่วน Price by Phase · Phase ที่ตั้งไว้ไม่หาย เปิดกลับได้</p></div>`;
+  if(!usePh()){
+    const p=S.phases[0];
+    return `${toggle}<div class="panel"><h3>รายการงานของทุกช่อง</h3>
+      <p class="help">ราคาต่อช่อง = ผลรวม (เรทรายการของช่อง × จำนวน) · ติ๊ก “เร่ง” เพื่อบวกค่าเร่งงานของช่องต่อชิ้น</p>
+      ${fIn("phases.0.deliverables","รายละเอียดงานที่แสดงให้ลูกค้า (บรรทัดละ 1 ข้อ · เว้นว่าง = แสดงตามรายการงาน)",{area:1,rows:3})}
+      <span class="lab">รายการงาน: ประเภท · ข้อความที่แสดง · จำนวน · เร่ง</span>
+      ${itemRows(p,0)}</div></div>`;
+  }
+  return `${toggle}<p class="help">แต่ละ Phase ใส่รายการงานได้ไม่จำกัด ราคา Phase ของแต่ละช่อง = ผลรวม (เรทรายการของช่อง × จำนวน) · ติ๊ก “เร่ง” เพื่อบวกค่าเร่งงานของช่องต่อชิ้น</p>
+  ${S.phases.map((p,pi)=>`<div class="panel">
+    <div class="grid2">${fIn(`phases.${pi}.name`,"ชื่อ Phase")}${fIn(`phases.${pi}.dates`,"ช่วงวันที่")}</div>
+    ${fIn(`phases.${pi}.deliverables`,"Deliverables ที่แสดงให้ลูกค้า (บรรทัดละ 1 ข้อ)",{area:1,rows:3})}
+    <span class="lab">รายการงาน: ประเภท · ข้อความที่แสดง · จำนวน · เร่ง</span>
+    ${itemRows(p,pi)}<button class="small" data-act="movePhase" data-p="${pi}" data-d="-1">↑</button><button class="small" data-act="movePhase" data-p="${pi}" data-d="1">↓</button><span class="grow"></span><button class="small danger" data-act="delPhase" data-p="${pi}">ลบ Phase</button></div>
   </div>`).join("")}
   <div><button class="solid" data-act="addPhase">+ เพิ่ม Phase</button></div>`;
 }
@@ -377,10 +394,10 @@ function tabPricing(){
   return `<div class="panel"><h3>ทั่วไป</h3>
     <div class="grid2">${fIn("settings.roundTo","ปัดราคาทีละ (฿)",{num:1})}${fIn("settings.vatPct","VAT (%)",{num:1})}</div>
     ${fChk("settings.showClipPrice","แสดงราคา 1 คลิปบนการ์ดให้ลูกค้าเห็น")}
-    ${fIn("settings.focusPhase","Phase ที่ลูกค้าเห็นก่อน (หน้า Price by Phase)",{select:S.phases.map(p=>[p.id,p.name])})}
+    ${usePh()?fIn("settings.focusPhase","Phase ที่ลูกค้าเห็นก่อน (หน้า Price by Phase)",{select:S.phases.map(p=>[p.id,p.name])}):""}
     ${fIn("settings.vatMode","คิด VAT แบบไหน",{select:[["all","ทั้งใบ (ออกใบเสนอในนามบริษัท)"],["channel","เฉพาะช่องที่ติ๊ก VAT"],["none","ไม่แสดง VAT"]]})}
   </div>
-  <div class="panel"><h3>ส่วนลดรับครบทุก Phase (ต่อช่อง)</h3>${fChk("settings.bundleOn","เปิดใช้")}${fIn("settings.bundlePct","ลด (%)",{num:1})}</div>
+  ${usePh()?`<div class="panel"><h3>ส่วนลดรับครบทุก Phase (ต่อช่อง)</h3>`:"<!--"}${fChk("settings.bundleOn","เปิดใช้")}${fIn("settings.bundlePct","ลด (%)",{num:1})}${usePh()?"</div>":"-->"}
   <div class="panel"><h3>ส่วนลดขั้นบันไดหลายช่อง</h3>${fChk("settings.tierOn","เปิดใช้")}
     ${S.settings.tiers.map((t,i)=>`<div class="rowline" style="grid-template-columns:1fr 1fr 30px"><div class="f"><label>ตั้งแต่ (ช่อง)</label><input data-bind="settings.tiers.${i}.min" data-num value="${t.min}"></div><div class="f"><label>ลด (%)</label><input data-bind="settings.tiers.${i}.pct" data-num value="${t.pct}"></div><button class="x" data-act="delTier" data-i="${i}" aria-label="ลบขั้น">×</button></div>`).join("")}
     <div><button class="small" data-act="addTier">+ เพิ่มขั้น</button></div></div>
@@ -395,14 +412,15 @@ function tabPricing(){
 }
 function autoItems(){
   const q=quote(); const items=[];
-  if(S.quote.mode==="byPhase"){
-    S.phases.filter(p=>S.quote.includePh?.[p.id]!==false).map(phaseSummary).forEach(x=>{
+  const mode=usePh()?S.quote.mode:"channel";
+  if(mode==="byPhase"){
+    PH().filter(p=>S.quote.includePh?.[p.id]!==false).map(phaseSummary).forEach(x=>{
       if(!x.rows.length) return;
       items.push({title:`${x.ph.name} — ${x.rows.length} ช่อง`,desc:x.rows.map(r=>`${r.c.name}: ${linesText(r.r)}${r.rush?` + เร่ง ${fmt(r.rush)}`:""}`).join("\n"),qty:1,unit:"งาน",price:x.content+x.rush+x.extra,_ph:x});
     });
     return items;
   }
-  if(S.quote.mode==="phase"){
+  if(mode==="phase"){
     q.list.forEach(({c,k})=>{
       k.act.forEach(r=>{ items.push({title:`${c.name} — ${r.ph.name}`,desc:linesText(r),qty:1,unit:"งาน",price:r.price}); if(r.rush) items.push({title:`${c.name} — ค่าเร่งงาน ${r.ph.name.split(":")[0]}`,desc:"",qty:1,unit:"รายการ",price:r.rush}); });
       if(k.bundle) items.push({title:`${c.name} — ส่วนลดรับครบทุก Phase`,desc:"",qty:1,unit:"รายการ",price:-k.bundle});
@@ -410,7 +428,7 @@ function autoItems(){
     });
   } else {
     q.list.forEach(({c,k})=>{
-      const d=[...k.act.map(r=>`${r.ph.name} ${fmt(r.price)} (${linesText(r)})`), k.bundle?`ลดครบ Phase −${fmt(k.bundle)}`:"", k.rush?`ค่าเร่งงาน ${fmt(k.rush)}`:"", ...k.extras.map(e=>`${e.x.label} ${fmt(e.amt)}`)].filter(Boolean).join("\n");
+      const d=[...k.act.map(r=>usePh()?`${r.ph.name} ${fmt(r.price)} (${linesText(r)})`:r.lines.map(l=>`${l.label}${l.qty>1?` ×${l.qty}`:""} ${l.included?"(รวมแล้ว)":fmt(l.amt)}`).join("\n")), k.bundle?`ลดครบ Phase −${fmt(k.bundle)}`:"", k.rush?`ค่าเร่งงาน ${fmt(k.rush)}`:"", ...k.extras.map(e=>`${e.x.label} ${fmt(e.amt)}`)].filter(Boolean).join("\n");
       items.push({title:`ช่อง ${c.name}${mainHandle(c)?` (${mainHandle(c)})`:""}`,desc:d,qty:1,unit:"แพ็ก",price:k.total});
     });
   }
@@ -423,11 +441,11 @@ function quoteData(){
   const sub=items.reduce((s,it)=>s+(+it.qty||0)*(+it.price||0),0);
   const lines=[];
   const dealLbl=e=>`${e.x.label}${e.x.type==="dealPct"?` ${e.x.value}%`:""}`;
-  if(!custom && S.quote.mode==="byPhase"){
+  if(!custom && usePh() && S.quote.mode==="byPhase"){
     const phs=items.map(it=>it._ph).filter(Boolean);
     phs.forEach(x=>{ if(x.disc) lines.push([`ส่วนลดแพ็ก ${x.ph.name.split(":")[0]} (${x.rows.length} ช่อง ${x.pct}%)`,-x.disc]); });
     dealExtras(phs.reduce((s,x)=>s+x.content-x.disc,0)).forEach(e=>lines.push([dealLbl(e),e.amt]));
-    if(S.phases.every(p=>S.quote.includePh?.[p.id]!==false)){ const save=(sub+lines.reduce((s,l)=>s+l[1],0))-(q.pre+q.manual); if(save>0) lines.push(["ส่วนลดซื้อครบทุก Phase",-save]); }
+    if(PH().every(p=>S.quote.includePh?.[p.id]!==false)){ const save=(sub+lines.reduce((s,l)=>s+l[1],0))-(q.pre+q.manual); if(save>0) lines.push(["ส่วนลดซื้อครบทุก Phase",-save]); }
   } else if(!custom){
     if(q.disc) lines.push([`ส่วนลดแพ็ก ${q.sel.length} ช่อง ${q.pct}%`,-q.disc]);
     q.deal.forEach(e=>lines.push([dealLbl(e),e.amt]));
@@ -450,8 +468,8 @@ function tabQuote(){
     ${fIn("quote.notes","หมายเหตุ",{area:1,rows:5})}
     <div class="grid2">${fChk("quote.showSign","แสดงช่องลงนาม")}${fIn("quote.signName","ชื่อผู้เสนอราคา")}</div></div>
   <div class="panel"><h3>รายการในใบเสนอราคา</h3>
-    ${fIn("quote.mode","รูปแบบรายการอัตโนมัติ",{select:[["channel","1 บรรทัดต่อช่อง"],["byPhase","1 บรรทัดต่อ Phase (รวมทุกช่อง)"],["phase","แยกทุก Phase ต่อช่อง"]]})}
-    ${S.quote.mode==="byPhase"?`<div class="panel soft"><span class="lab">Phase ที่ใส่ในใบเสนอราคา</span>${S.phases.map(p=>`<label class="chk"><input type="checkbox" data-bind="quote.includePh.${p.id}" data-bool ${S.quote.includePh?.[p.id]!==false?"checked":""}> ${esc(p.name)}</label>`).join("")}</div>`:""}
+    ${usePh()?fIn("quote.mode","รูปแบบรายการอัตโนมัติ",{select:[["channel","1 บรรทัดต่อช่อง"],["byPhase","1 บรรทัดต่อ Phase (รวมทุกช่อง)"],["phase","แยกทุก Phase ต่อช่อง"]]}):""}
+    ${usePh()&&S.quote.mode==="byPhase"?`<div class="panel soft"><span class="lab">Phase ที่ใส่ในใบเสนอราคา</span>${PH().map(p=>`<label class="chk"><input type="checkbox" data-bind="quote.includePh.${p.id}" data-bool ${S.quote.includePh?.[p.id]!==false?"checked":""}> ${esc(p.name)}</label>`).join("")}</div>`:""}
     ${fChk("quote.useCustom","ใช้รายการที่แก้เอง (ไม่คำนวณอัตโนมัติ)")}
     ${S.quote.useCustom?`${S.quote.customItems.map((it,i)=>`<div class="panel soft">
         <div class="rowline item-edit"><input data-bind="quote.customItems.${i}.title" value="${esc(it.title)}" aria-label="รายการ"><input data-bind="quote.customItems.${i}.qty" data-num value="${it.qty}" aria-label="จำนวน"><input data-bind="quote.customItems.${i}.unit" value="${esc(it.unit)}" aria-label="หน่วย"><input data-bind="quote.customItems.${i}.price" data-num data-signed value="${it.price}" aria-label="ราคาต่อหน่วย"><button class="x" data-act="delItem" data-i="${i}" aria-label="ลบ">×</button></div>
@@ -460,7 +478,13 @@ function tabQuote(){
       <p class="help">โหมดแก้เอง: ส่วนลดขั้นบันไดไม่ถูกหักอัตโนมัติ ใส่เป็นรายการติดลบได้</p>`
      :`<p class="help">ตอนนี้ ${qd.items.length} รายการ · ยอดก่อน VAT ฿${fmt2(qd.total)}. กด “ใช้รายการที่แก้เอง” แล้ว “ดึงรายการอัตโนมัติมาแก้ต่อ” เพื่อแก้ข้อความ/ราคาแต่ละบรรทัด</p>`}
   </div>
-  <div><button class="solid" data-act="openQuote">ดูตัวอย่าง & ดาวน์โหลด PDF</button></div>`;
+  <div class="panel"><h3>ใบแจ้งหนี้ (Invoice)</h3>
+    <p class="help">ใช้รายการและยอดเงินเดียวกับใบเสนอราคา เปลี่ยนแค่หัวกระดาษ เลขที่ วันที่ และหมายเหตุ · ลูกค้าไม่เห็นใบแจ้งหนี้บนลิงก์</p>
+    <div class="grid3">${fIn("invoice.number","Invoice #")}${fIn("invoice.date","วันที่")}${fIn("invoice.due","ครบกำหนดชำระ")}</div>
+    ${fIn("invoice.clientBlock","Bill to (เว้นว่าง = ใช้ข้อมูลเดียวกับใบเสนอราคา)",{area:1,rows:3})}
+    ${fIn("invoice.notes","หมายเหตุ / ช่องทางชำระเงิน (เว้นว่าง = ใช้หมายเหตุของใบเสนอราคา)",{area:1,rows:4})}
+    <div class="grid2">${fChk("invoice.showRef","แสดงเลขที่ใบเสนอราคาอ้างอิง")}${fIn("invoice.signName","ชื่อผู้วางบิล")}</div></div>
+  <div class="controls" style="display:flex;gap:8px;flex-wrap:wrap"><button class="solid" data-act="openQuote">ดูใบเสนอราคา</button><button class="solid" data-act="openInvoice">ดูใบแจ้งหนี้</button></div>`;
 }
 function tabContent(){
   return `<div class="panel"><h3>หัวเรื่องหน้าเว็บ</h3>
@@ -486,11 +510,12 @@ function tabBrand(){
 function tabData(){
   return `<div class="panel"><h3>สำรอง / ใช้เป็นเทมเพลตลูกค้าอื่น</h3>
     <p class="help">ปุ่ม “บันทึก” จะบันทึกลงเซิร์ฟเวอร์ ลูกค้าที่เปิดลิงก์เห็นเวอร์ชันล่าสุด · ทำข้อเสนอให้ลูกค้าเจ้าใหม่ได้จากหน้ารายการ (ทำสำเนา) หรือดาวน์โหลด JSON เก็บเป็นสำรอง</p>
-    <div class="panel-head"><button class="small" data-act="dlJSON">ดาวน์โหลด JSON</button><button class="small" data-act="copyJSON">คัดลอก JSON</button><label class="small" style="display:inline-flex;gap:6px;align-items:center">โหลดไฟล์ <input type="file" accept="application/json,.json" data-import style="width:auto;border:0;padding:0"></label></div>
+    <div class="panel-head"><button class="small" data-act="dlJSON">ดาวน์โหลด JSON</button>${driveOK?`<button class="small" data-act="jsonDrive">สำรองลง Google Drive</button>`:""}<button class="small" data-act="copyJSON">คัดลอก JSON</button><label class="small" style="display:inline-flex;gap:6px;align-items:center">โหลดไฟล์ <input type="file" accept="application/json,.json" data-import style="width:auto;border:0;padding:0"></label></div>
     <textarea id="jsonBox" rows="6" placeholder="หรือวาง JSON ตรงนี้แล้วกดโหลด"></textarea>
     <div class="panel-head"><button class="small" data-act="pasteJSON">โหลดจากที่วาง</button><span class="grow"></span><button class="small danger" data-act="askReset">คืนค่าเป็นเทมเพลตตั้งต้น</button></div>
     <div id="resetBox" hidden class="banner"><span>ล้างค่าที่แก้ทั้งหมดกลับเป็นค่าเริ่มต้น?</span><button class="small" data-act="doReset">ยืนยัน</button><button class="small" data-act="cancelReset">ยกเลิก</button></div>
-  </div>`;
+  </div>
+  ${driveOK?"":`<div class="panel soft"><h3>Google Drive</h3><p class="help">ยังไม่ได้เชื่อม Google Drive บนเซิร์ฟเวอร์ ดูวิธีตั้งค่าใน README หัวข้อ “Google Drive”</p></div>`}`;
 }
 function renderAdmin(){
   const root=$("#adminRoot");
@@ -583,8 +608,13 @@ document.addEventListener("click",e=>{
     copyTSV(){ menuOpen=false; renderSite(); copy(rateRows().map(r=>r.join("\t")).join("\n"),"คัดลอกตารางแล้ว เปิด Google Sheets แล้วกดวาง"); },
     xlsx(){ menuOpen=false; renderSite(); dlXLSX(); },
     csv(){ menuOpen=false; renderSite(); const csv=rateRows().map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(",")).join("\n"); save(fileBase()+".csv","﻿"+csv); },
-    openQuote(){ openQuote(); },
-    closeQuote(){ $("#modalRoot").innerHTML=""; },
+    openQuote(){ openQuote("quote"); },
+    openInvoice(){ openQuote("invoice"); },
+    pdfDrive(){ exportPDF(b,"drive"); },
+    sheetDrive(){ menuOpen=false; renderSite(); toDrive(makeXLSX(),fileBase()+".xlsx",XLSX_MIME,true); },
+    jsonDrive(){ toDrive(new Blob([JSON.stringify(S,null,1)]),`backup-${fileBase()}.json`,"application/json",false); },
+    closeQuote(){ $("#modalRoot").innerHTML=""; docType="quote"; },
+    closeDrive(){ document.querySelectorAll(".drive-done").forEach(x=>x.remove()); },
     pdf(){ exportPDF(b); },
     addCh(){ const ph={}; S.channels.push({id:uid(),name:"ช่องใหม่",niche:"",avatar:"",price:10000,rush:2000,vat:false,on:true,ph,override:{},rates:{},note:"",platforms:[{p:"TikTok",handle:"@",url:"",followers:0,likes:0}]}); changed(true); setTimeout(()=>{ const ds=document.querySelectorAll(".drawer-body details"); ds[ds.length-1].open=true; ds[ds.length-1].scrollIntoView({block:"start"}); },0); },
     delCh(){ S.channels.splice(i,1); changed(true); },
@@ -660,7 +690,7 @@ function replyText(){
     L.push(`▶ ช่อง ${c.name} — ผู้ติดตามรวม ${compact(reach(c))}`);
     L.push("   "+c.platforms.map(p=>`${p.p} ${compact(p.followers)}`).join(" / "));
     if(c.platforms[0]?.url) L.push("   "+c.platforms[0].url);
-    k.act.forEach(r=>{ L.push(`- ${r.ph.name} = ${fmt(r.price)} บาท`); L.push(`   (${linesText(r)})`); });
+    k.act.forEach(r=>{ if(usePh()){ L.push(`- ${r.ph.name} = ${fmt(r.price)} บาท`); L.push(`   (${linesText(r)})`); } else r.lines.forEach(l=>L.push(`- ${l.label}${l.qty>1?` ×${l.qty}`:""} = ${l.included?"รวมในราคาแล้ว":fmt(l.amt)+" บาท"}`)); });
     if(k.bundle) L.push(`- ส่วนลดรับครบทุก Phase = −${fmt(k.bundle)} บาท`);
     if(k.rush) L.push(`- ค่าเร่งงาน = ${fmt(k.rush)} บาท`);
     k.extras.forEach(e=>L.push(`- ${e.x.label} = ${fmt(e.amt)} บาท`));
@@ -671,15 +701,18 @@ function replyText(){
   q.deal.forEach(e=>L.push(`${e.x.label}${e.x.type==="dealPct"?` ${e.x.value}%`:""} (คิดครั้งเดียว) = ${fmt(e.amt)} บาท`));
   if(q.manual) L.push(`${S.settings.manualDiscountLabel} = −${fmt(q.manual)} บาท`);
   L.push(`ราคาสุทธิ = ${fmt(q.pre)} บาท (ยังไม่รวม VAT)`,"");
-  L.push("สรุปราคาแยก Phase (รวมทุกช่อง ถ้าซื้อเฉพาะ Phase นั้น)");
-  S.phases.map(phaseSummary).forEach(x=>L.push(`- ${x.ph.name} (${x.rows.length} ช่อง) = ${fmt(x.pre)} บาท`));
-  L.push(`- ครบทุก Phase = ${fmt(q.pre)} บาท`,"","หมายเหตุ");
+  if(usePh()){
+    L.push("สรุปราคาแยก Phase (รวมทุกช่อง ถ้าซื้อเฉพาะ Phase นั้น)");
+    PH().map(phaseSummary).forEach(x=>L.push(`- ${x.ph.name} (${x.rows.length} ช่อง) = ${fmt(x.pre)} บาท`));
+    L.push(`- ครบทุก Phase = ${fmt(q.pre)} บาท`,"");
+  }
+  L.push("หมายเหตุ");
   S.terms.split("\n").filter(l=>l.trim()).forEach(l=>L.push("• "+l));
   return L.join("\n");
 }
 function rateRows(){
   const q=quote(); const ex=S.extras.filter(x=>x.on&&!isDeal(x));
-  const head=["ช่อง","ผู้ติดตามรวม","TikTok","Instagram","YouTube","Facebook","TikTok Likes","ราคา 1 คลิป",...S.phases.map(p=>p.name),"ส่วนลดครบ Phase","ค่าเร่งงาน",...ex.map(x=>x.label),"รวม/ช่อง","ลิงก์"];
+  const head=["ช่อง","ผู้ติดตามรวม","TikTok","Instagram","YouTube","Facebook","TikTok Likes","ราคา 1 คลิป",...PH().map(p=>phName(p)),"ส่วนลดครบ Phase","ค่าเร่งงาน",...ex.map(x=>x.label),"รวม/ช่อง","ลิงก์"];
   const pf=(c,n)=>c.platforms.filter(p=>p.p===n).reduce((s,p)=>s+(+p.followers||0),0)||"";
   const rows=q.list.map(({c,k})=>[c.name,reach(c),pf(c,"TikTok"),pf(c,"Instagram"),pf(c,"YouTube"),pf(c,"Facebook"),c.platforms.reduce((s,p)=>s+(+p.likes||0),0)||"",k.P||"",...k.rows.map(r=>r.on?r.price:""),k.bundle?-k.bundle:"",k.rush||"",...ex.map(x=>k.extras.find(e=>e.x.id===x.id)?.amt||""),k.total,c.platforms[0]?.url||""]);
   const pad=n=>Array(n).fill("");
@@ -692,16 +725,18 @@ function rateRows(){
   if(S.settings.vatMode!=="none") foot.push([...pad(w-3),`VAT ${S.settings.vatPct}%`,Math.round(q.vat*100)/100,""],[...pad(w-3),"รวมทั้งสิ้น",Math.round(q.grand*100)/100,""]);
   const items=[[],["รายการงานต่อ Phase"],["ช่อง","Phase","รายการ","จำนวน","ราคาต่อหน่วย","รวม"],
     ...q.list.flatMap(({c,k})=>k.act.flatMap(r=>[...r.lines.map(l=>[c.name,r.ph.name,l.label,l.qty,l.included?"รวมแล้ว":l.unit,l.amt]),...(r.rush?[[c.name,r.ph.name,"ค่าเร่งงาน","","",r.rush]]:[])]))];
-  const ps=S.phases.map(phaseSummary);
+  const ps=PH().map(phaseSummary);
   const phBlock=[[],["สรุปราคาแยก Phase (รวมทุกช่อง ถ้าซื้อเฉพาะ Phase นั้น)"],["Phase","จำนวนช่อง","ค่าคอนเทนต์","ค่าเร่งงาน","ค่าเพิ่ม","ส่วนลดแพ็ก %","ส่วนลดแพ็ก","ค่าครั้งเดียวต่อดีล","สุทธิก่อน VAT","VAT","รวมทั้งสิ้น"],
     ...ps.map(x=>[x.ph.name,x.rows.length,x.content,x.rush,x.extra,x.pct,-x.disc,x.dealAmt,x.pre,Math.round(x.vat*100)/100,Math.round(x.grand*100)/100]),
     ["ครบทุก Phase",q.sel.length,q.net,q.rush,q.extra,q.pct,-q.disc,q.dealAmt,q.pre,Math.round(q.vat*100)/100,Math.round(q.grand*100)/100]];
-  return [[S.meta.campaign],[`${S.meta.client} × ${S.meta.brand} · ${S.meta.date}`],[],head,...rows,[],...foot,...phBlock,...items];
+  return [[S.meta.campaign],[`${S.meta.client} × ${S.meta.brand} · ${S.meta.date}`],[],head,...rows,[],...foot,...(usePh()?phBlock:[]),...items];
 }
-function dlXLSX(){
-  if(!window.XLSX){ toast("โหลดตัวสร้างไฟล์ไม่สำเร็จ ใช้ “คัดลอกตาราง” แทน"); return; }
+const XLSX_MIME="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+function dlXLSX(){ const b=makeXLSX(); if(b) save(fileBase()+".xlsx",b); }
+function makeXLSX(){
+  if(!window.XLSX){ toast("โหลดตัวสร้างไฟล์ไม่สำเร็จ ใช้ “คัดลอกตาราง” แทน"); return null; }
   const wb=XLSX.utils.book_new();
-  const ws=XLSX.utils.aoa_to_sheet(rateRows()); ws["!cols"]=[{wch:18},{wch:12},{wch:10},{wch:10},{wch:10},{wch:10},{wch:12},{wch:11},...S.phases.map(()=>({wch:14})),{wch:12},{wch:14},{wch:14},{wch:12},{wch:36}];
+  const ws=XLSX.utils.aoa_to_sheet(rateRows()); ws["!cols"]=[{wch:18},{wch:12},{wch:10},{wch:10},{wch:10},{wch:10},{wch:12},{wch:11},...PH().map(()=>({wch:14})),{wch:12},{wch:14},{wch:14},{wch:12},{wch:36}];
   XLSX.utils.book_append_sheet(wb,ws,"Rate");
   const qd=quoteData();
   const qrows=[[S.company.nameTh],[S.company.nameEn],["ใบเสนอราคา / Quotation", "", "#"+S.quote.number],["วันที่",S.quote.date],["Project",S.quote.project],[],["#","รายการ","รายละเอียด","Qty","หน่วย","Unit price","Total"],...qd.items.map((it,i)=>[i+1,it.title,it.desc,+it.qty,it.unit,+it.price,(+it.qty)*(+it.price)]),[],["","","","","","Subtotal",qd.sub],...qd.lines.map(l=>["","","","","",l[0],l[1]]),["","","","","","Total",qd.total]];
@@ -709,31 +744,45 @@ function dlXLSX(){
   const ws2=XLSX.utils.aoa_to_sheet(qrows); ws2["!cols"]=[{wch:5},{wch:40},{wch:50},{wch:6},{wch:8},{wch:14},{wch:14}];
   XLSX.utils.book_append_sheet(wb,ws2,"Quotation");
   const buf=XLSX.write(wb,{bookType:"xlsx",type:"array"});
-  save(fileBase()+".xlsx",new Blob([buf]));
+  return new Blob([buf]);
+}
+let docType="quote"; // "quote" | "invoice" (invoice is admin-only)
+function docInfo(){
+  const qt=S.quote, iv=S.invoice||{};
+  if(docType==="invoice") return {title:"ใบแจ้งหนี้ /Invoice",forLbl:"Bill to",numLbl:"Invoice#",number:iv.number||"",date:iv.date||"",due:iv.due||"",client:iv.clientBlock||qt.clientBlock,notes:iv.notes||qt.notes,
+    ref:iv.showRef!==false&&qt.number?`อ้างอิงใบเสนอราคาเลขที่ ${qt.number}`:"",sign:["ผู้วางบิล"+(iv.signName?`<br>${esc(iv.signName)}`:""),"ผู้รับวางบิล"],file:`Invoice-${iv.number||"draft"}`};
+  return {title:"ใบเสนอราคา /Quotation",forLbl:"Quotation for",numLbl:"Quotation#",number:qt.number,date:qt.date,due:"",client:qt.clientBlock,notes:qt.notes,ref:"",
+    sign:["ผู้เสนอราคา"+(qt.signName?`<br>${esc(qt.signName)}`:""),"ผู้อนุมัติ / ลูกค้า"],file:`Quotation-${qt.number||"draft"}`};
 }
 function quoteHTML(){
-  const qd=quoteData(), co=S.company, qt=S.quote;
+  const qd=quoteData(), co=S.company, qt=S.quote, di=docInfo();
   const vatRow=S.settings.vatMode!=="none";
   return `<div class="qdoc" id="qdoc">
     <div class="qbar"></div>
     <div class="qtop"><div class="co">${S.brand.logo?`<img src="${esc(S.brand.logo)}" alt="" style="height:46px;width:auto;display:block;margin-bottom:10px">`:""}<b>${esc(co.nameTh)}</b><b>${esc(co.nameEn)}</b><div class="addr">${esc(co.address)}</div></div>
       <div class="right"><div>เลขประจำตัวผู้เสียภาษี : ${esc(co.taxId)}</div><div>${esc(co.email)}</div><div>${esc(co.phone)}</div></div></div>
-    <h1 class="qt">ใบเสนอราคา /Quotation</h1><div class="qd">วันที่ : ${esc(qt.date)}</div>
-    <div class="qmeta"><div><div class="h">Quotation for</div><div class="v">${esc(qt.clientBlock)}</div></div><div><div class="h">Project</div><div class="v proj">${esc(qt.project)}</div></div><div><div class="h">Quotation#</div><div class="v">${esc(qt.number)}</div></div></div>
+    <h1 class="qt">${di.title}</h1><div class="qd">${[di.date||docType!=="invoice"?`วันที่ : ${esc(di.date)}`:"",di.due?`ครบกำหนดชำระ : ${esc(di.due)}`:""].filter(Boolean).join(" &nbsp;·&nbsp; ")}</div>
+    <div class="qmeta"><div><div class="h">${di.forLbl}</div><div class="v">${esc(di.client)}</div></div><div><div class="h">Project</div><div class="v proj">${esc(qt.project)}</div></div><div><div class="h">${di.numLbl}</div><div class="v">${esc(di.number)}</div>${di.ref?`<div class="v" style="font-size:11px;color:#555;margin-top:6px">${esc(di.ref)}</div>`:""}</div></div>
     <hr>
     <table><thead><tr><th colspan="2">${esc(qt.sectionTitle)}</th><th style="text-align:right">Qty</th><th style="text-align:right">Unit price</th><th style="text-align:right">Total</th></tr></thead>
     <tbody>${qd.items.map((it,i)=>`<tr><td class="n">${i+1}.</td><td><div class="t">${esc(it.title)}</div>${it.desc?`<div class="d">${esc(it.desc)}</div>`:""}</td><td class="qty">${esc(it.qty)} ${esc(it.unit)}</td><td style="text-align:right;white-space:nowrap">${fmt2(it.price)}</td><td style="text-align:right;white-space:nowrap">${fmt2((+it.qty)*(+it.price))}</td></tr>`).join("")}</tbody></table>
-    <div class="qfoot"><div class="notes"><h4>หมายเหตุ</h4><div>${esc(qt.notes)}</div></div>
+    <div class="qfoot"><div class="notes"><h4>หมายเหตุ</h4><div>${esc(di.notes)}</div></div>
       <div class="tot"><span class="k">Subtotal</span><span>${fmt2(qd.sub)}</span>
         ${qd.lines.map(l=>`<span class="k">${esc(l[0])}</span><span>${fmt2(l[1])}</span>`).join("")}
         <span class="k">Total</span><b>฿${fmt2(qd.total)}</b>
         ${vatRow?`<span class="k">VAT ${S.settings.vatPct}%</span><b>฿${fmt2(qd.vat)}</b><span></span><span class="gv">฿${fmt2(qd.grand)}</span>`:""}</div></div>
-    ${qt.showSign?`<div class="sign"><div>ผู้เสนอราคา${qt.signName?`<br>${esc(qt.signName)}`:""}</div><div>ผู้อนุมัติ / ลูกค้า</div></div>`:""}
+    ${qt.showSign?`<div class="sign"><div>${di.sign[0]}</div><div>${di.sign[1]}</div></div>`:""}
   </div>`;
 }
-function openQuote(){
+function openQuote(type){
+  docType = (type==="invoice" && caps.canEdit) ? "invoice" : "quote";
   menuOpen=false; renderSite();
-  $("#modalRoot").innerHTML=`<div class="modal" role="dialog" aria-label="ใบเสนอราคา"><div class="modal-bar"><button class="small solid" data-act="pdf">ดาวน์โหลด PDF</button><button class="small" data-act="xlsx">.xlsx</button><button class="small" data-act="closeQuote">ปิด</button></div><div class="qwrap"><div class="qscale">${quoteHTML()}</div></div></div>`;
+  const admin=caps.canEdit;
+  $("#modalRoot").innerHTML=`<div class="modal" role="dialog" aria-label="${docType==="invoice"?"ใบแจ้งหนี้":"ใบเสนอราคา"}"><div class="modal-bar">
+    ${admin?`<span class="seg"><button class="small ${docType==="quote"?"solid":""}" data-act="openQuote">ใบเสนอราคา</button><button class="small ${docType==="invoice"?"solid":""}" data-act="openInvoice">ใบแจ้งหนี้</button></span>`:""}
+    <button class="small solid" data-act="pdf">ดาวน์โหลด PDF</button><button class="small" data-act="xlsx">.xlsx</button>
+    ${admin&&driveOK?`<button class="small" data-act="pdfDrive">บันทึก PDF ลง Drive</button>`:""}
+    <button class="small" data-act="closeQuote">ปิด</button></div><div class="qwrap"><div class="qscale">${quoteHTML()}</div></div></div>`;
   fitQuote();
 }
 function fitQuote(){ const w=$(".qwrap"), s=$(".qscale"); if(!w||!s) return; const k=Math.min(1,w.clientWidth/794); s.style.transform=`scale(${k})`; s.style.height=($("#qdoc").offsetHeight*k)+"px"; w.style.height=($("#qdoc").offsetHeight*k)+"px"; }
@@ -752,7 +801,7 @@ function paginate(doc){
   }
   const h=doc.getBoundingClientRect().height; doc.style.minHeight=(Math.ceil(h/PH)*PH)+"px";
 }
-async function exportPDF(btn){
+async function exportPDF(btn,dest){
   if(!window.html2canvas||!window.jspdf){ toast("โหลดตัวสร้าง PDF ไม่สำเร็จ"); return; }
   btn.disabled=true; const old=btn.textContent; btn.textContent="กำลังสร้าง…";
   try{
@@ -769,9 +818,28 @@ async function exportPDF(btn){
       if(pg) pdf.addPage();
       pdf.addImage(c.toDataURL("image/jpeg",.92),"JPEG",0,0,210,c.height*210/c.width);
     }
-    await save(`Quotation-${S.quote.number}-${fileBase()}.pdf`,pdf.output("blob"));
+    const name=`${docInfo().file}-${fileBase()}.pdf`;
+    if(dest==="drive") await toDrive(pdf.output("blob"),name,"application/pdf",false); else await save(name,pdf.output("blob"));
   }catch(e){ toast("สร้าง PDF ไม่สำเร็จ"); }
   btn.disabled=false; btn.textContent=old;
+}
+
+/* =================== Google Drive (admin only, via server) =================== */
+let driveOK=false;
+function blobToBase64(blob){ return new Promise((res,rej)=>{ const fr=new FileReader(); fr.onload=()=>res(String(fr.result).split(",")[1]); fr.onerror=rej; fr.readAsDataURL(blob); }); }
+async function toDrive(blob,filename,mimeType,convert){
+  if(!blob) return;
+  if(!REC){ toast("บันทึกลง Drive ได้จากหน้า Backend เท่านั้น"); return; }
+  toast("กำลังบันทึกลง Google Drive…");
+  const r=await api(`/api/proposals/${REC.id}/drive`,{method:"POST",body:{filename,mimeType,convert:!!convert,data:await blobToBase64(blob)}});
+  if(!r.ok){ toast(r.data?.error||"บันทึกลง Drive ไม่สำเร็จ"); return; }
+  showDriveLink(r.data);
+}
+function showDriveLink(f){
+  document.querySelectorAll(".drive-done").forEach(x=>x.remove());
+  const d=document.createElement("div"); d.className="toast drive-done"; d.setAttribute("role","status");
+  d.innerHTML=`บันทึกลง Drive แล้ว: <a href="${esc(f.webViewLink||"#")}" target="_blank" rel="noopener" style="color:inherit;text-decoration:underline">${esc(f.name||"เปิดไฟล์")}</a> <button class="small ghost" data-act="closeDrive" style="color:inherit">ปิด</button>`;
+  document.body.appendChild(d); setTimeout(()=>d.remove(),15000);
 }
 
 /* =================== admin: login & list =================== */
@@ -794,7 +862,7 @@ async function renderList(){
   const r=await api("/api/proposals"); if(r.status===401) return renderLogin();
   const items=r.data?.items||[];
   $("#app").innerHTML=`<header class="topbar gutter"><div class="max"><span class="wordmark">Proposal Backend</span>
-      <div class="actions"><button class="small solid" data-list="new">+ ข้อเสนอใหม่จากเทมเพลต</button><button class="small" data-list="logout">ออกจากระบบ</button></div></div></header>
+      <div class="actions"><button class="small solid" data-list="new" data-template="general">+ ข้อเสนอใหม่ (ทั่วไป)</button><button class="small" data-list="new" data-template="rov-10th">+ แบบมี Phase (เทมเพลต RoV)</button><button class="small" data-list="logout">ออกจากระบบ</button></div></div></header>
     <main class="block gutter"><div class="max">
       <div class="block-head"><h2>Proposals</h2><p>ลิงก์ลูกค้าแต่ละอันแยกกัน ลูกค้าเห็นเฉพาะราคาสุดท้าย ไม่เห็นสูตรหรือหน้านี้</p></div>
       <div class="scroll"><table><thead><tr><th>ชื่อ</th><th>ลูกค้า</th><th>สถานะ</th><th>แก้ล่าสุด</th><th></th></tr></thead><tbody>
@@ -809,7 +877,7 @@ async function renderList(){
 async function listAction(b){
   const a=b.dataset.list;
   if(a==="logout"){ await api("/api/logout",{method:"POST"}); location.reload(); }
-  else if(a==="new"){ const r=await api("/api/proposals",{method:"POST",body:{}}); if(r.ok) location.href=`${BASE}/admin/p/${r.data.meta.id}`; }
+  else if(a==="new"){ const r=await api("/api/proposals",{method:"POST",body:{template:b.dataset.template||"general"}}); if(r.ok) location.href=`${BASE}/admin/p/${r.data.meta.id}`; }
   else if(a==="dup"){ const r=await api("/api/proposals",{method:"POST",body:{fromId:b.dataset.id}}); if(r.ok) location.href=`${BASE}/admin/p/${r.data.meta.id}`; }
   else if(a==="copy"){ copy(location.origin+BASE+"/p/"+b.dataset.slug,"คัดลอกลิงก์ลูกค้าแล้ว"); }
   else if(a==="del"){ if(!b.dataset.sure){ b.dataset.sure="1"; b.textContent="กดอีกครั้งเพื่อลบ"; return; } await api(`/api/proposals/${b.dataset.id}`,{method:"DELETE"}); renderList(); }
@@ -834,6 +902,7 @@ async function boot(){
   const [rec,seed]=await Promise.all([api(`/api/proposals/${m[1]}`),api("/api/seed")]);
   if(!rec.ok){ $("#app").innerHTML=`<main class="auth gutter"><div class="auth-card"><h1>ไม่พบข้อเสนอนี้</h1><a href="${BASE}/admin">กลับไปหน้ารายการ</a></div></main>`; return; }
   REC=rec.data.meta; S=rec.data.state; DEFAULT=seed.data; normalize();
+  try{ driveOK=!!(await api("/api/drive/status")).data?.configured; }catch(e){}
   DRAFT_KEY="ssn-draft-"+REC.id;
   caps.canEdit=true; adminOpen=true;
   document.title=`${REC.title} · Backend`;

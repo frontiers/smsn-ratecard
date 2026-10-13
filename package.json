@@ -4,12 +4,15 @@
   "private": true,
   "description": "Creator proposal site: password-protected backend + read-only client links",
   "main": "server.js",
-  "engines": { "node": ">=18" },
+  "engines": {
+    "node": ">=18"
+  },
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
     "hash-password": "node scripts/hash-password.js",
-    "test": "node --test"
+    "test": "node --test",
+    "google-auth": "node scripts/google-auth.js"
   },
   "dependencies": {
     "dotenv": "^16.4.5",

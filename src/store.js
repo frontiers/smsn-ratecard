@@ -7,7 +7,7 @@ const crypto = require("crypto");
 const DATA_DIR = path.resolve(process.env.DATA_DIR || path.join(__dirname, "..", "data"));
 const PDIR = path.join(DATA_DIR, "proposals");
 const TRASH = path.join(DATA_DIR, "trash");
-const SEED_FILE = path.join(__dirname, "..", "seed", "rov-10th.json");
+const SEED_DIR = path.join(__dirname, "..", "seed");
 
 const ID_RE = /^[a-f0-9]{12}$/;
 const SLUG_RE = /^[A-Za-z0-9_-]{16}$/;
@@ -25,8 +25,10 @@ async function writeAtomic(file, obj) {
   await fs.rename(tmp, file);
 }
 
-async function readSeed() {
-  return JSON.parse(await fs.readFile(SEED_FILE, "utf8"));
+// Templates live in seed/<name>.json. "rov-10th" also defines the full state shape used to fill missing keys.
+async function readSeed(name = "rov-10th") {
+  if (!/^[a-z0-9-]+$/.test(name)) name = "rov-10th";
+  return JSON.parse(await fs.readFile(path.join(SEED_DIR, name + ".json"), "utf8"));
 }
 
 const metaOf = (rec) => ({

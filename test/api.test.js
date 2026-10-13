@@ -102,3 +102,36 @@ test("bad ids and slugs are 404, not errors", async () => {
   assert.equal((await req("/api/proposals/../../etc")).r.status, 404);
   assert.equal((await req("/api/public/nope")).r.status, 404);
 });
+
+test("general template has no phases; invoice details never reach the client", async () => {
+  const created = await req("/api/proposals", { method: "POST", body: { template: "general" } });
+  assert.equal(created.r.status, 201);
+  const full = await req(`/api/proposals/${created.data.meta.id}`);
+  const st = full.data.state;
+  assert.equal(st.settings.usePhases, false);
+  assert.equal(st.phases.length, 1);
+  st.channels[0].on = true;
+  st.invoice.notes = "เลขบัญชีลับ 123-4-56789";
+  st.invoice.number = "INV-001";
+  await req(`/api/proposals/${created.data.meta.id}`, { method: "PUT", body: { published: true, state: st } });
+  const saveCookie = cookie;
+  cookie = null;
+  const pub = await req(`/api/public/${created.data.meta.slug}`);
+  cookie = saveCookie;
+  assert.equal(pub.data.settings.usePhases, false);
+  const body = JSON.stringify(pub.data);
+  assert.ok(!body.includes("INV-001") && !body.includes("เลขบัญชีลับ"), "invoice leaked to client");
+  assert.equal(pub.data.channels.length, 1);
+});
+
+test("Drive: status needs login and reports not configured; upload refuses cleanly", async () => {
+  const saveCookie = cookie;
+  cookie = null;
+  assert.equal((await req("/api/drive/status")).r.status, 401);
+  cookie = saveCookie;
+  assert.equal((await req("/api/drive/status")).data.configured, false);
+  const { data } = await req("/api/proposals");
+  const up = await req(`/api/proposals/${data.items[0].id}/drive`, { method: "POST", body: { filename: "a.pdf", mimeType: "application/pdf", data: Buffer.from("%PDF").toString("base64") } });
+  assert.equal(up.r.status, 503);
+  assert.match(up.data.error, /Google Drive/);
+});

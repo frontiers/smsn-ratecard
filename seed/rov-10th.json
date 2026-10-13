@@ -82,7 +82,8 @@
    }
   ],
   "focusPhase": "p4",
-  "showClipPrice": true
+  "showClipPrice": true,
+  "usePhases": true
  },
  "extras": [
   {
@@ -580,5 +581,14 @@
    "included": false,
    "note": "ตามเรทการ์ด 3,000 บาท/คน"
   }
- ]
+ ],
+ "invoice": {
+  "number": "",
+  "date": "",
+  "due": "",
+  "clientBlock": "",
+  "showRef": true,
+  "signName": "",
+  "notes": "กรุณาชำระเงินภายในวันที่ครบกำหนด\nโอนเข้าบัญชี: ธนาคาร ............ \nชื่อบัญชี: บริษัท สามัญสำนึก จำกัด\nเลขที่บัญชี: ............\nหักภาษี ณ ที่จ่าย 3% ได้ กรุณาส่งหนังสือรับรองการหักภาษีมาที่ Contact@futureboard.co"
+ }
 }

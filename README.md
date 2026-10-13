@@ -46,10 +46,27 @@ docker compose up -d --build
 ```
 nginx examples for a subdomain or a sub-path (`BASE_PATH=/proposals`) are in `deploy/nginx.conf.example`.
 
+## Google Drive (save PDFs, Sheets and backups)
+Buttons appear in the Backend once these four values are in the server `.env`. Files go to one Drive folder, with a sub-folder per proposal; saving a file with the same name again updates it (same link). "บันทึกเป็น Google Sheet" makes a dated Google Sheet each time.
+
+1. In [Google Cloud Console](https://console.cloud.google.com/): create a project → **APIs & Services → Enable APIs** → enable **Google Drive API**.
+2. **OAuth consent screen**: External (or Internal for Workspace), add your Google account as a test user.
+3. **Credentials → Create credentials → OAuth client ID → Desktop app**. Copy the client ID and secret.
+4. On your own computer, in this folder:
+   ```bash
+   GOOGLE_CLIENT_ID=xxx GOOGLE_CLIENT_SECRET=yyy npm run google-auth
+   ```
+   Open the printed link, allow access. It creates a "Samansamnuek Proposals" folder in that Google account and prints `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REFRESH_TOKEN`, `DRIVE_FOLDER_ID`.
+5. Paste those lines into `~/samansamnuek-proposals/.env` on the server and run `pm2 reload samansamnuek-proposals --update-env`.
+
+The app only gets the `drive.file` permission: it can see and change only the files and folders it created, nothing else in your Drive. If the consent screen stays in "Testing", Google expires the token after 7 days — publish the consent screen (no review needed for `drive.file`) to keep it working.
+
 ## Everyday use
 
 1. Go to `/admin`, log in.
-2. **ทำสำเนา** an existing proposal (keeps the roster and rates) or **+ ข้อเสนอใหม่จากเทมเพลต**.
+2. **+ ข้อเสนอใหม่ (ทั่วไป)** for a normal job (no phases, tick the channels you want), **+ แบบมี Phase** for multi-phase campaigns, or **ทำสำเนา** an existing proposal.
+   Phases can be switched on/off any time in Backend → งาน / Phase.
+   Backend → ใบเสนอราคา / ใบแจ้งหนี้ also produces the **Invoice** (same items and totals, its own number/date/due date/payment notes; never shown on the client link).
 3. Edit in the Backend drawer, tick **เปิดลิงก์ให้ลูกค้า**, press **บันทึก**.
 4. **คัดลอกลิงก์** and send it to the client. **สร้างลิงก์ใหม่** revokes the old link immediately.
 

@@ -37,7 +37,7 @@ function toPublic(state) {
     company: pick(state.company, ["nameTh", "nameEn", "address", "taxId", "email", "phone"]),
     meta: pick(state.meta, ["campaign", "client", "brand", "date", "valid", "intro"]),
     quote: pick(state.quote, ["number", "date", "project", "sectionTitle", "clientBlock", "mode", "useCustom", "customItems", "includePh", "notes", "signName", "showSign"]),
-    settings: pick(settings, ["roundTo", "bundlePct", "bundleOn", "tierOn", "vatMode", "vatPct", "manualDiscount", "manualDiscountLabel", "tiers", "focusPhase", "showClipPrice"]),
+    settings: pick(settings, ["roundTo", "bundlePct", "bundleOn", "tierOn", "vatMode", "vatPct", "manualDiscount", "manualDiscountLabel", "tiers", "focusPhase", "showClipPrice", "usePhases"]),
     itemTypes: types.map((t) => pick(t, ["id", "label", "unit", "included"])),
     extras: extrasOn.map((x) => pick(x, ["id", "label", "type", "value", "on"])),
     phases: (state.phases || []).map((p) => ({

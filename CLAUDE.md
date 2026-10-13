@@ -17,7 +17,15 @@ UI copy is Thai. Keep new UI text in Thai, short and plain.
 - `public/assets/app.js` — one front-end for both pages (`<body data-mode="admin|client">`). Sections: state utils → pricing (`calc`, `quote`, `phaseSummary`) → site render → admin drawer tabs → events → server API → exports (copy text, TSV, xlsx, csv, quotation PDF via html2canvas+jsPDF) → login/list → boot.
 - `public/assets/app.css` — CI: black/white with Futureboard greys (#717171, #A2A3A2), square corners, Barlow Condensed + Kanit display, IBM Plex Sans Thai body. Brand colours/fonts/logos are also editable per proposal (Backend → แบรนด์ & บริษัท) and applied via CSS variables in `applyBrand()`.
 - `seed/rov-10th.json` — template used for "new proposal" and first run (RoV 10th anniversary campaign for Hepmil / Garena).
-- `test/api.test.js` — `npm test` (node:test, no extra deps).
+- `src/drive.js` — Google Drive uploads (OAuth refresh token, `drive.file` scope, plain fetch). `POST /api/proposals/:id/drive` (admin) uploads PDF / xlsx (optionally converted to a Google Sheet) / JSON into `DRIVE_FOLDER_ID/<proposal title>/`. `scripts/google-auth.js` gets the token and creates the root folder.
+- `seed/general.json` (no phases, channels off) and `seed/rov-10th.json` (phases) — templates for "new proposal"; `rov-10th` also supplies default keys in `normalize()`.
+- `test/api.test.js`, `test/drive.test.js` — `npm test` (node:test, no extra deps; Drive is tested against a fake Google API).
+
+## Phases are optional
+`settings.usePhases === false` → `PH()` returns only `phases[0]`; the page hides Price by Phase, phase buttons, the bundle discount and phase quotation modes, and cards list items directly. Phases beyond the first are kept so it can be switched back.
+
+## Quotation / Invoice
+One document template (`quoteHTML`) with `docType` "quote" | "invoice"; `docInfo()` switches title, number, date/due, Bill-to, notes and signature labels. Invoice data lives in `state.invoice` and is never sent to `/api/public/*` (tested).
 
 ## Pricing model (keep client and server in sync)
 - **Rate card** `state.itemTypes[]` `{id,label,unit,ratio,floor,included,note}`: price for a channel = `channel.rates[id]` if set, else `max(ratio × channel.price, floor)` rounded to `settings.roundTo`; `included:true` → 0 (e.g. event day / tournament day, already covered by the clip fee because the team + MC go on site anyway).
