@@ -65,8 +65,19 @@ DATA_DIR=$DATA_DIR
 ENV
 fi
 
-echo "==> Installing dependencies and (re)starting with pm2"
-$SSH "cd '$APP_DIR' && npm ci --omit=dev --no-audit --no-fund && pm2 startOrReload deploy/ecosystem.config.cjs --update-env && pm2 save >/dev/null && sleep 2"
+echo "==> Installing dependencies"
+$SSH "cd '$APP_DIR' && npm ci --omit=dev --no-audit --no-fund"
+
+# If the server runs the app as a systemd service, restart that; a pm2 copy would only fight it for the port.
+SERVICE="${SERVICE:-samansamnuek-proposals}"
+if $SSH "systemctl cat '$SERVICE.service' >/dev/null 2>&1"; then
+  echo "==> Restarting systemd service $SERVICE (may ask for the server password)"
+  $SSH "pm2 describe '$SERVICE' >/dev/null 2>&1 && pm2 delete '$SERVICE' >/dev/null && pm2 save >/dev/null || true"
+  ssh -t -o StrictHostKeyChecking=accept-new "$TARGET" "sudo systemctl restart '$SERVICE' && sleep 2"
+else
+  echo "==> (Re)starting with pm2"
+  $SSH "cd '$APP_DIR' && pm2 startOrReload deploy/ecosystem.config.cjs --update-env && pm2 save >/dev/null && sleep 2"
+fi
 
 if [[ -n "$DOMAIN" ]]; then
   echo "==> Setting up nginx + HTTPS for $DOMAIN"
@@ -106,4 +117,4 @@ echo
 echo "Done."
 if [[ -n "$DOMAIN" ]]; then echo "Backend: https://$DOMAIN/admin"
 else echo "Backend: http://${TARGET#*@}:$PORT/admin   (plain HTTP — add --domain to get HTTPS before sharing links)"; fi
-echo "Tip: run once on the server to survive reboots:  pm2 startup  (then run the command it prints)"
+$SSH "systemctl cat '$SERVICE.service' >/dev/null 2>&1" || echo "Tip: run once on the server to survive reboots:  pm2 startup  (then run the command it prints)"

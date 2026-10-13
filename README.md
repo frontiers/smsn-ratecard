@@ -35,6 +35,7 @@ chmod +x deploy/deploy.sh
 - First run installs Node 20 + pm2, asks for the admin password and writes the server's `.env` (never overwritten later).
 - Code goes to `~/samansamnuek-proposals`, proposals to `~/samansamnuek-proposals-data` (kept across deploys — back this folder up).
 - Run the same command again to deploy an update. On the server run `pm2 startup` once so it restarts after a reboot.
+- If the server already runs the app as a systemd service named `samansamnuek-proposals` (as on the samansamnuek server: port 3006, nginx snippet `/etc/nginx/snippets/samansamnuek-proposals.conf`), the script restarts that service instead of using pm2 and asks for the server password for `sudo`. Set `SERVICE=<name>` for a different service name.
 
 ### Automatic on every push (GitHub Actions)
 `.github/workflows/deploy.yml` runs the tests and deploys when you push to `main`. Do the first deploy with the script above, then add repo secrets `DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_SSH_KEY`.
